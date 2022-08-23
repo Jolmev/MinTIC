@@ -1,0 +1,137 @@
+import java.sql.*;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+
+public class JDBCUtilities {
+    // Atributos de clase para gestión de conexión con la base de datos
+    private static final String UBICACION_BD = "ProyectosConstruccion.db";
+    
+    public static Connection getConnection() throws SQLException {
+        String url = "jdbc:sqlite:" + UBICACION_BD;
+        return DriverManager.getConnection(url);
+    }
+}
+
+public class ProyectosBanco {
+    Connection c = JDBCUtilities.getConnection();
+    public ResultSet datos;
+
+    public ProyectosBanco(String banco) throws Exception{
+        String consulta = "SELECT ID_Proyecto, Constructora, Ciudad, Proyecto.Clasificacion, Tipo.Estrato, Lider.Nombre || ' ' || Lider.Primer_Apellido || ' ' || Lider.Segundo_Apellido AS LIDER FROM Proyecto JOIN Tipo ON Proyecto.ID_Tipo = Tipo.ID_Tipo JOIN Lider ON Proyecto.ID_Lider = Lider.ID_Lider WHERE Banco_Vinculado = '" + banco + "' ORDER BY Fecha_Inicio DESC, Ciudad, Constructora";
+        Statement stmt = c.createStatement();
+        datos = stmt.executeQuery(consulta);
+        //c.close();
+    }
+}
+
+public class DeudasPorProyecto {
+    Connection c = JDBCUtilities.getConnection();
+    public ResultSet datos;
+
+    public DeudasPorProyecto(Double limiteInferior) throws Exception{
+        String consulta = "SELECT ID_Proyecto, SUM(Compra.Cantidad*MaterialConstruccion.Precio_Unidad) AS VALOR FROM Compra JOIN MaterialConstruccion ON Compra.ID_MaterialConstruccion = MaterialConstruccion.ID_MaterialConstruccion WHERE Compra.Pagado = 'No' GROUP BY ID_Proyecto HAVING VALOR > "+ String.valueOf(limiteInferior) +" ORDER BY VALOR DESC";
+        Statement stmt = c.createStatement();
+        datos = stmt.executeQuery(consulta);
+        //c.close();
+    }
+}
+
+public class ComprasDeLider {
+    Connection c = JDBCUtilities.getConnection();
+    public ResultSet datos;
+
+    public ComprasDeLider() throws Exception{
+        String consulta = "SELECT Lider.Nombre || ' ' || Lider.Primer_Apellido || ' ' || Lider.Segundo_Apellido AS LIDER, SUM(Compra.Cantidad*MaterialConstruccion.Precio_Unidad) AS VALOR FROM Lider JOIN Proyecto ON Lider.ID_Lider = Proyecto.ID_Lider JOIN Compra ON Proyecto.ID_Proyecto = Compra.ID_Proyecto JOIN MaterialConstruccion ON Compra.ID_MaterialConstruccion = MaterialConstruccion.ID_MaterialConstruccion GROUP BY LIDER ORDER BY VALOR DESC LIMIT 10";
+        Statement stmt = c.createStatement();
+        datos = stmt.executeQuery(consulta);
+        //c.close();
+    }
+}
+
+public class ReportesController {
+    ProyectosBanco proyectos;
+    DeudasPorProyecto deudas;
+    ComprasDeLider compras;
+
+    public ResultSet generarInformeProyectosBanco(String banco) throws Exception{
+        proyectos = new ProyectosBanco(banco);
+        return proyectos.datos;
+    }
+
+    public ResultSet generarInformeDeudasPorProyecto(Double limiteInferior) throws Exception{
+        deudas = new DeudasPorProyecto(limiteInferior);
+        return deudas.datos;
+    }
+
+    public ResultSet generarInformeComprasDeLider() throws Exception{
+        compras = new ComprasDeLider();
+        return compras.datos;
+    }
+}
+
+public class ReportesView {
+    ReportesController controlador = new ReportesController();
+
+    private String repitaCaracter(Character caracter, Integer veces) {
+        String respuesta = "";
+        for (int i = 0; i < veces; i++) {
+            respuesta += caracter;
+        }
+        return respuesta;
+    }
+    public void proyectosFinanciadosPorBanco(String banco)  {
+        System.out.println(repitaCaracter('=', 36) + " LISTADO DE PROYECTOS POR BANCO " + repitaCaracter('=', 37));
+        if (banco != null && !banco.isBlank()) {
+            System.out.println(String.format("%3s %-25s %-20s %-15s %-7s %-30s","ID", "CONSTRUCTORA", "CIUDAD", "CLASIFICACION", "ESTRATO", "LIDER"));
+            System.out.println(repitaCaracter('-', 105));
+            
+            try{
+            ResultSet Proyectos = controlador.generarInformeProyectosBanco(banco);
+            while(Proyectos.next()){
+                int id = Proyectos.getInt("ID_Proyecto");
+                String constructora = Proyectos.getString("Constructora");
+                String ciudad = Proyectos.getString("Ciudad");
+                String clasificacion = Proyectos.getString("Clasificacion");
+                int estrato = Proyectos.getInt("Estrato");
+                String lider = Proyectos.getString("LIDER");
+                System.out.println(String.format("%3d %-25s %-20s %-15s %7d %-30s", id, constructora, ciudad, clasificacion, estrato, lider));
+            
+            }
+            }
+            catch (Exception e){}
+        }
+    }
+    public void totalAdeudadoPorProyectosSuperioresALimite(Double limiteInferior)  {
+        System.out.println(repitaCaracter('=', 1) + " TOTAL DEUDAS POR PROYECTO " + repitaCaracter('=', 1));
+        if (limiteInferior != null) {
+            System.out.println(String.format("%3s %14.9s", "ID", "VALOR "));
+            System.out.println(repitaCaracter('-', 29));
+        
+           try{
+            ResultSet deudas = controlador.generarInformeDeudasPorProyecto(limiteInferior);
+            while(deudas.next()){
+                int id = deudas.getInt("ID_Proyecto");
+                Double valor = deudas.getDouble("VALOR");
+                System.out.println(String.format("%3d %,15.1f", id, valor));
+            }
+        }
+        catch (Exception e){}
+        }
+    }
+    public void lideresQueMasGastan() {
+        System.out.println(repitaCaracter('=', 6) + " 10 LIDERES MAS COMPRADORES " + repitaCaracter('=', 7));
+        System.out.println(String.format("%-25s %14.9s", "LIDER", "VALOR "));
+        System.out.println(repitaCaracter('-', 41));
+        
+        try{
+        ResultSet compras = controlador.generarInformeComprasDeLider();
+            while(compras.next()){
+                String lider = compras.getString("LIDER");
+                Double valor = compras.getDouble("VALOR");
+                System.out.println(String.format("%-25s %,15.1f", lider, valor));
+            }
+        }
+        catch (Exception e){}
+    }
+}
